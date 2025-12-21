@@ -10,4 +10,9 @@ pub mod ex_11;
 pub mod ex_12;
 pub mod ex_13;
 pub mod ex_14;
-pub mod ex_15; 
+pub mod ex_15;
+pub mod ex_16;
+pub mod ex_17;
+pub mod ex_18;
+pub mod ex_20;
+
