@@ -1,8 +1,6 @@
 mod exercises;
-use crate::exercises::ex_21 as ex;
+use crate::exercises::ex_22 as ex;
 fn main() {
-
-    let data = ex::data();
-    ex::ex_21(&data);
+    ex::ex_22();
 
 }

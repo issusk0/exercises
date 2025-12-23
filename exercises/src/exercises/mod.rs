@@ -16,4 +16,5 @@ pub mod ex_17;
 pub mod ex_18;
 pub mod ex_20;
 pub mod ex_21;
+pub mod ex_22;
 
