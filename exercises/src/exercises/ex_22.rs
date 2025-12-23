@@ -21,16 +21,14 @@ impl TcpStreamReassembler {
         }
     }
 
-    pub fn process_segment(&mut self, packet: &[u8]) -> i32 {
+    pub fn process_segment(&mut self, packet: &[u8]) {
         let tcp = split_fragment(packet);
-
+        let bytes: [u8; 4] = [tcp[4], tcp[5], tcp[6], tcp[7]];
+        let current_seq = u32::from_be_bytes(bytes);
         // inicializar ISN
-        if self.isn.is_none() {
-            let bytes: [u8; 4] = [tcp[4], tcp[5], tcp[6], tcp[7]];
-            let current_seq = u32::from_be_bytes(bytes);
+        if self.isn.is_none() || current_seq < self.isn.unwrap() {
             self.isn = Some(current_seq);
             self.next_seq = current_seq;
-            return 0;
         }
 
         if let Some(initial_seq) = self.isn {
@@ -42,7 +40,6 @@ impl TcpStreamReassembler {
             let payload = &tcp[data_offset_len..];
 
             if payload.is_empty() {
-                return 1;
             }
 
             match current_seq {
@@ -60,6 +57,7 @@ impl TcpStreamReassembler {
                     }
                     self.buffer[start..end].copy_from_slice(payload);
                     self.recieve_mask[start..end].fill(true);
+                    self.checkin_data(self.isn.unwrap_or(0));
                 }
 
                 // paquete antiguo
@@ -81,6 +79,7 @@ impl TcpStreamReassembler {
                         self.recieve_mask[start..end].fill(true);
                         self.next_seq =
                             current_seq.wrapping_add(payload.len() as u32);
+                        self.checkin_data(self.isn.unwrap_or(0));
                     }
                 }
 
@@ -97,17 +96,19 @@ impl TcpStreamReassembler {
                     }
                     self.buffer[start..end].copy_from_slice(payload);
                     self.recieve_mask[start..end].fill(true);
+                    self.checkin_data(self.isn.unwrap_or(0));
                 }
 
-                _ => return 1,
+                _ => {}
             }
         }
-
-        0
     }
 
     pub fn checkin_data(&mut self, initial_seq: u32) {
-        let start = (self.next_seq - initial_seq) as usize;
+        if self.next_seq < initial_seq {
+            return;
+        }
+        let start = (self.next_seq.wrapping_sub(initial_seq)) as usize;
         if start < self.recieve_mask.len() {
             for state in &self.recieve_mask[start..] {
                 if !*state {
@@ -125,45 +126,56 @@ impl TcpStreamReassembler {
 
 
 pub fn ex_22() {
-    // 1. Inicializar el reensamblador
     let mut reassembler = TcpStreamReassembler::new();
-
-    // 2. Definir paquetes de prueba (Simplificados)
-    // Formato: [IP Header (20b)] + [TCP Header (20b)] + [Payload]
-    
-    // Paquete 1: Establece el ISN (Secuencia 1000)
-    let mut pkt1 = vec![0u8; 40]; 
-    pkt1[0] = 0x45; // IP IHL = 5 (20 bytes)
-    pkt1[24] = 0x03; pkt1[25] = 0xE8; // TCP Seq: 1000 (0x03E8)
-    pkt1[32] = 0x50; // TCP Offset = 5 (20 bytes)
-    // (Este primer paquete solo inicializa el ISN en tu código actual)
-
-    // Paquete 2: Datos en orden (Secuencia 1000, "Hola")
-    let mut pkt2 = pkt1.clone();
-    let payload2 = b"Hola";
-    pkt2.extend_from_slice(payload2);
-
-    // Paquete 3: Datos del futuro (Secuencia 1010, "Mundo") - Deja un hueco
-    let mut pkt3 = vec![0u8; 40];
-    pkt3[0] = 0x45;
-    pkt3[24] = 0x03; pkt3[25] = 0xF2; // TCP Seq: 1010
-    pkt3[32] = 0x50;
-    pkt3.extend_from_slice(b"Mundo");
-
-    // 3. Procesar los segmentos
-    println!("--- Procesando Paquete 1 (ISN) ---");
+    let pkt1: Vec<u8> = vec![
+        0x45,0x00, 0x00,0x3c,  
+        0x00,0x01, 0x40,0x00,
+        0x40, 0x06,
+        0x00,0x00,
+        192,168,1,10,
+        192,168,1,20,
+        0x30,0x39,            
+        0x01,0xbb,            
+        0x00,0x00,0x03,0xE8,  
+        0x00,0x00,0x00,0x00,  
+        0x50,0x18,            
+        0x72,0x10,
+        0x00,0x00,
+        0x00,0x00,
+        0x16,0x03,0x03,0x00,0x05,
+        0x01,0xAA,0xBB,0xCC,0xDD,
+    ];
+    let pkt2: Vec<u8> = vec![
+        0x45,0x00, 0x00,0x3c,
+        0x00,0x02, 0x40,0x00,
+        0x40, 0x06,
+        0x00,0x00,
+        192,168,1,10,
+        192,168,1,20,
+        0x30,0x39,
+        0x01,0xbb,
+        0x00,0x00,0x03,0xF2,  
+        0x00,0x00,0x00,0x00,
+        0x50,0x18,
+        0x72,0x10,
+        0x00,0x00,
+        0x00,0x00,
+        0xEE,0xFF,0x11,0x22,0x33,
+        0x44,0x55,0x66,0x77,0x88,
+    ];
+    reassembler.process_segment(&pkt2);
     reassembler.process_segment(&pkt1);
 
-    println!("--- Procesando Paquete 3 (FUTURO) ---");
-    reassembler.process_segment(&pkt3); 
-    // Aquí verás en el buffer que "Mundo" está lejos y hay un hueco de ceros
 
-    println!("--- Procesando Paquete 2 (ORDEN) ---");
-    reassembler.process_segment(&pkt2); 
-    // Aquí el checkin_data debería detectar que el hueco se llenó
+    // Buscamos el primer 0x16 (inicio de TLS) y mostramos los siguientes 20 bytes
+    if let Some(start) = reassembler.buffer.iter().position(|&x| x != 0) {
+        let end = (start + 20).min(reassembler.buffer.len());
+        println!("Flujo TLS Completo: {:X?}", &reassembler.buffer[start..end]);
+    }else{
+        println!("El buffer esta vacío")
+        
+    } //asignamos el valor absoluto si el x es distinto de 0   
+    
 
-    // 4. Ver el resultado final
-    println!("Buffer final: {:?}", reassembler.buffer);
-    println!("Contenido: {}", String::from_utf8_lossy(&reassembler.buffer));
 }
 
